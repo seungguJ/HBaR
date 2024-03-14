@@ -45,7 +45,7 @@ def training_standard(config_dict):
 
         if config_dict['save_last_model_only'] and cepoch == nepoch:
             filename = os.path.splitext(config_dict['model_file'])[0]
-            save_model(model,get_model_path("{}.pt".format(filename)))
+            save_model(model,get_model_path("{}.pt".format(filename+'_'+config_dict['adv_method'])))
     
         # Robustness Analysis
         model_single_output.load_state_dict(model.state_dict())
@@ -55,7 +55,7 @@ def training_standard(config_dict):
         
     log_dict['epoch_log_dict'] = epoch_log_dict
     log_dict['config_dict'] = config_dict
-    filename = "{}.npy".format(os.path.splitext(config_dict['model_file'])[0])
+    filename = "{}.npy".format(os.path.splitext(config_dict['model_file']+config_dict['adv_method'])[0])
     save_logs(log_dict, get_log_filepath("{}".format(filename)))
 
     return batch_log_list, epoch_log_dict

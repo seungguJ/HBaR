@@ -4,6 +4,7 @@ from .  import *
 from ..model.lenet import *
 from ..model.vgg import *
 from ..model.resnet import *
+from ..model.wideresnet import *
 
 from torch.optim.lr_scheduler import _LRScheduler
 def activations_extraction(model, data_loader, out_dim=10, hid_idx=-1,):
@@ -72,13 +73,16 @@ def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
 def model_distribution(config_dict):
-
-    if config_dict['model'] == 'lenet3':
-        model = LeNet3(**config_dict)
-    elif config_dict['model'] == 'vgg16':
-        model = VGG16(**config_dict)
-    elif config_dict['model'] == 'resnet18':
-        model = ResNet18(**config_dict)
+    if config_dict['data_code'] == 'cifar100':
+        num_classes = 100
+    else:
+        num_classes = 10
+    if config_dict['model'] == 'resnet18':
+        model = ResNet18(**config_dict, num_classes=num_classes)
+    elif config_dict['model'] == 'resnet50':
+        model = ResNet50(**config_dict, num_classes=num_classes)
+    elif config_dict['model'] == 'wideresnet-28-10':
+        model = wideresnet(config_dict['model'], num_classes=num_classes, **config_dict)
     else:
         raise ValueError("Unknown model name or not support [{}]".format(config_dict['model']))
 
@@ -159,86 +163,47 @@ class GradualWarmupScheduler(_LRScheduler):
         else:
             return super(GradualWarmupScheduler, self).step(epoch)
         
-def mart_loss(args,model,
-              x_natural,
-              y,
-              optimizer,
-              step_size=0.007,
-              epsilon=0.031,
-              perturb_steps=10,
-              beta=6.0,
-              distance='l_inf'):
-    kl = nn.KLDivLoss(reduction='none')
-    model.eval()
-    batch_size = len(x_natural)
-    # generate adversarial example
-    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
-    if distance == 'l_inf':
-        for _ in range(perturb_steps):
-            x_adv.requires_grad_()
-            with torch.enable_grad():
-                if args.hsic:
-                    loss_ce = F.cross_entropy(model(x_adv)[0], y)
-                else:
-                    loss_ce = F.cross_entropy(model(x_adv), y)
-            grad = torch.autograd.grad(loss_ce, [x_adv])[0]
-            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
-            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
-            x_adv = torch.clamp(x_adv, 0.0, 1.0)
-    else:
-        x_adv = torch.clamp(x_adv, 0.0, 1.0)
-    model.train()
 
-    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+def trades_loss(config_dict,
+                output,
+                adv_output,
+                y,
+                beta=6.0):
+    # define KL-loss
+    criterion_kl = nn.KLDivLoss(size_average=False)
+    batch_size = output.size(0)
     # zero gradient
-    optimizer.zero_grad()
+    # calculate robust loss
+    # logits = model(x_natural)
+    criterion = CrossEntropyLossMaybeSmooth(smooth_eps=config_dict['smooth_eps'])
+    loss_natural = criterion(output, y, smooth=config_dict['smooth'])
+    loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(adv_output, dim=1),
+                                                    torch.clamp(F.softmax(output, dim=1), min=1e-8))
+    loss = loss_natural + beta * loss_robust
+    return loss
 
-    if args.hsic:
-        logits,hiddens = model(x_natural)
-        logits_adv,hiddens_adv = model(x_adv)
-    else:
-        logits = model(x_natural)
-        logits_adv = model(x_adv)
-    adv_probs = F.softmax(logits_adv, dim=1)
+def mart_loss(config_dict,
+              output,
+              adv_output,
+              y,
+              beta=6.0):
+    kl = nn.KLDivLoss(reduction='none')
+    batch_size = y.size(0)
 
-    tmp1 = torch.argsort(adv_probs, dim=1)[:, -2:]
+    adv_probs = F.softmax(adv_output, dim=1)
+
+    tmp1 = torch.argsort(adv_output, dim=1)[:, -2:]
 
     new_y = torch.where(tmp1[:, -1] == y, tmp1[:, -2], tmp1[:, -1])
 
-    loss_adv = F.cross_entropy(logits_adv, y) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
+    criterion = CrossEntropyLossMaybeSmooth(smooth_eps=config_dict['smooth_eps'])
+    loss_adv = criterion(adv_output, y, smooth=config_dict['smooth']) + F.nll_loss(torch.log(1.0001 - adv_probs + 1e-12), new_y)
 
-    nat_probs = F.softmax(logits, dim=1)
+    nat_probs = torch.clamp(F.softmax(output, dim=1), min=1e-8)
 
     true_probs = torch.gather(nat_probs, 1, (y.unsqueeze(1)).long()).squeeze()
 
-    loss_robust = (1.0 / batch_size) * torch.sum(
-        torch.sum(kl(torch.log(adv_probs + 1e-12), nat_probs), dim=1) * (1.0000001 - true_probs))
+    loss_robust = (1.0 / batch_size) * torch.sum(torch.sum(kl(torch.log(adv_probs+1e-12), nat_probs),dim=1) * (1.0000001 - true_probs))
     loss = loss_adv + float(beta) * loss_robust
 
-    if args.ce:
-        loss += args.lambda_ce * F.cross_entropy(logits, y)
-    if args.hsic:
-        if args.hsic_adv:
-            data = x_adv
-            hiddens = hiddens_adv
-        else:
-            data = x_natural
-        # compute hsic
-        h_target = y.view(-1,1)
-        h_target = to_categorical(h_target, num_classes=10).float()
-        h_data = data.view(-1, np.prod(data.size()[1:]))
-
-        for i in range(len(hiddens)):
-            if len(hiddens[i].size()) > 2:
-                hiddens[i] = hiddens[i].view(-1, np.prod(hiddens[i].size()[1:]))
-
-            hx_l, hy_l = hsic_objective(
-                    hiddens[i],
-                    h_target=h_target.float(),
-                    h_data=h_data,
-                    sigma=5,
-                    k_type_y='linear'
-            )
-            temp_hsic = args.lambda_x * hx_l - args.lambda_y * hy_l
-            loss += temp_hsic.cuda()
     return loss

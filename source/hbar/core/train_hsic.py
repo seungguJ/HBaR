@@ -42,8 +42,8 @@ def hsic_train(cepoch, model, data_loader, optimizer, scheduler, config_dict):
         # adversarial training
         if config_dict['adv_train']:
             attacked_data = attack(data, target)
-            output, hiddens = model(attacked_data)
-            _, hiddens = model(data)
+            adv_output, hiddens = model(attacked_data)
+            output, hiddens = model(data)
         else:
             output, hiddens = model(data)
             
@@ -52,7 +52,15 @@ def hsic_train(cepoch, model, data_loader, optimizer, scheduler, config_dict):
         if config_dict['mixup']:
             loss = mixup_criterion(criterion, output, target_a, target_b, lam, config_dict['smooth'])
         else:
-            loss = criterion(output, target, smooth=config_dict['smooth'])
+            if config_dict['adv_method'] == 'trades':
+                loss = trades_loss(config_dict, output, adv_output, target)
+            elif config_dict['adv_method'] == 'mart':
+                loss = mart_loss(config_dict, output, adv_output, target)
+            else: # pgd
+                if config_dict['adv_train']:
+                    loss = criterion(adv_output, target, smooth=config_dict['smooth'])
+                else: # standard
+                    loss = criterion(output, target, smooth=config_dict['smooth'])
         total_loss += (loss * config_dict['xentropy_weight'])
         
         # compute hsic

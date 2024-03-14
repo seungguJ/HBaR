@@ -122,7 +122,7 @@ def get_accuracy(output, target, topk=(1,)):
     correct = pred.eq(target.view(1, -1).expand_as(pred))
     res = []
     for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0)
+        correct_k = correct[:k].reshape(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
@@ -152,4 +152,4 @@ def get_layer_parameters(model, idx_range):
 
 def to_categorical(y, num_classes):
     """ 1-hot encodes a tensor """
-    return torch.squeeze(torch.eye(num_classes)[y])
+    return torch.squeeze(torch.eye(num_classes, device='cuda')[y])

@@ -1,15 +1,13 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 # Combining HBaR with adversarial training 
 
-dataset=cifar10
-model=resnet18
+dataset=svhn
+model=wideresnet-28-10
 
 xw=1
-lx=0.0005
-ly=0.005
+lx=0.0001
+ly=0.0005
 
-run_hbar -cfg config/general-hbar-xentropy-${dataset}.yaml -slmo -xw $xw -lx ${lx} -ly ${ly} \
--adv -ep 83 \
--mf ${dataset}_${model}_xw_${xw}_lx_${lx}_ly_${ly}_adv.pt
+run_hbar -cfg config/general-hbar-xentropy-cifar10.yaml -slmo -xw $xw -lx ${lx} -ly ${ly} -adv -mf ${dataset}_${model}_xw_${xw}_lx_${lx}_ly_${ly}.pt

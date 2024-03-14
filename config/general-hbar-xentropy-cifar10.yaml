@@ -1,6 +1,6 @@
 batch_size: 128
-learning_rate: 0.01
-epochs: 300
+learning_rate: 0.1
+epochs: 95
 sigma: 5.
 lambda_x: 0.
 lambda_y: 0.
@@ -8,8 +8,8 @@ seed: 1234
 k_type_y: linear
 
 device: cuda
-model: resnet18
-data_code: cifar10
+model: wideresnet-28-10 # wideresnet28-10, resnet50, resnet18
+data_code: svhn # svhn, cifar100, cifar10
 model_file: test.pt
 checkpoint: null
 task: pre-train
@@ -21,8 +21,8 @@ warmup_lr :  0.0001
 warmup_epochs :  5
 mix_up :  False
 alpha :  0.3
-smooth :  False
-smooth_eps :  0
+smooth :  True
+smooth_eps :  0.1
 log_batch_interval: 10
 verbose: 0
 exp_index: null
@@ -35,3 +35,5 @@ attack_type: pgd
 epsilon: 8
 pgd_steps: 10
 pgd_alpha: 2
+
+adv_method: trades # trades, mart, pgd

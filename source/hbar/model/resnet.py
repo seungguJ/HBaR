@@ -67,12 +67,17 @@ class Bottleneck(nn.Module):
             )
 
     def forward(self, x):
+        if isinstance(x, tuple):
+            x, output_list = x
+        else:
+            output_list = []
         out = F.relu(self.bn1(self.conv1(x)))
         out = F.relu(self.bn2(self.conv2(out)))
         out = self.bn3(self.conv3(out))
         out += self.shortcut(x)
         out = F.relu(out)
-        return out
+        output_list.append(out)
+        return out, output_list
 
 
 class ResNet(nn.Module):
@@ -133,13 +138,14 @@ class ResNet(nn.Module):
 
 def ResNet18(**kwargs):
     rob = kwargs['robustness'] if 'robustness' in kwargs else False
-    return ResNet(BasicBlock, [2,2,2,2], rob=rob)
+    return ResNet(BasicBlock, [2,2,2,2], rob=rob, num_classes=10)
 
 def ResNet34(**kwargs):
     return ResNet(BasicBlock, [3,4,6,3])
 
 def ResNet50(**kwargs):
-    return ResNet(Bottleneck, [3,4,6,3])
+    rob = kwargs['robustness'] if 'robustness' in kwargs else False
+    return ResNet(Bottleneck, [3,4,6,3], rob=rob, num_classes=10)
 
 def ResNet101(**kwargs):
     return ResNet(Bottleneck, [3,4,23,3])
